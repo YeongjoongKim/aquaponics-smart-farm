@@ -1,46 +1,79 @@
 version: '3.8'
 
 services:
-  aquaponics:
+  aquaponics-server:
+    container_name: aquaponics-smart-farm
+    
+    # [빌드 설정]
+    # raspberry_pi 폴더 내의 Dockerfile을 사용하여 이미지 빌드
     build:
-      context: .
+      context: ./raspberry_pi
       dockerfile: Dockerfile
-    container_name: aquaponics-smartfarm
+    
+    # [이미지 태그]
+    # README.md 및 문서 기준 최신 버전 명시
+    image: aquaponics-monitor:v1.5.0
+    
+    # [재시작 정책]
+    # 명시적으로 중지하지 않는 한, 부팅 시나 오류 발생 시 자동 재시작
+    restart: unless-stopped
+    
+    # [하드웨어 접근 권한]
+    # Arduino Serial 포트(/dev/ttyUSB0)에 대한 안정적인 R/W 권한 확보를 위해 privileged 모드 사용
+    # 보안이 중요한 환경에서는 device와 group_add 옵션으로 대체 가능하나, 임베디드 장비에서는 이 방식이 가장 확실함
+    privileged: true
+    
+    # [포트 매핑]
+    # 호스트 5000 -> 컨테이너 5000 (Web Dashboard & API)
     ports:
       - "5000:5000"
+    
+    # [디바이스 매핑]
+    # Arduino Mega 연결 확인: 호스트의 /dev/ttyUSB0를 컨테이너 내부로 연결
+    # 주의: 아두이노 모델에 따라 /dev/ttyACM0 일 수 있으니 'ls /dev/'로 확인 필요
+    devices:
+      - "/dev/ttyUSB0:/dev/ttyUSB0"
+    
+    # [볼륨 마운트]
+    # 1. DB 및 로그 지속성 보장 (컨테이너 삭제 후에도 데이터 유지)
+    # 2. 설정 파일(config.json) 핫 리로딩 지원
+    # 3. 호스트 시간대 동기화
     volumes:
       - ./data:/app/data
-      - ./logs:/app/logs
       - ./config.json:/app/config.json
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+
+    # [환경 변수]
     environment:
-      - PYTHONUNBUFFERED=1
-      - TZ=UTC
-    devices:
-      # I2C device (for ADS1115 ADC)
-      - /dev/i2c-1:/dev/i2c-1
-      # 1-Wire device (for DS18B20 temperature sensor)
-      - /dev/ttyUSB0:/dev/ttyUSB0
-      # GPIO access
-      - /dev/mem:/dev/mem
-      - /dev/gpiomem:/dev/gpiomem
-    cap_add:
-      - SYS_PTRACE
-    privileged: true
-    restart: unless-stopped
+      - TZ=Asia/Seoul
+      - FLASK_APP=app/main.py
+      - FLASK_DEBUG=0        # Production 모드 실행
+      - PYTHONUNBUFFERED=1   # Docker Logs에서 Python 출력을 지연 없이 즉시 확인
+      # - ARDUINO_PORT=/dev/ttyUSB0 # (옵션) 코드 내 하드코딩 대신 환경변수 처리 시 사용
+
+    # [네트워크]
     networks:
       - aquaponics-network
+
+    # [헬스 체크]
+    # API 상태(/api/status)를 주기적으로 확인하여 컨테이너 건전성 판단
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/status"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 40s      # 초기 Arduino 시리얼 연결 안정화 시간 확보 (중요)
+
+    # [로깅 설정]
+    # Raspberry Pi SD카드 용량 보호를 위한 로그 로테이션 설정 (필수)
     logging:
       driver: "json-file"
       options:
-        max-size: "10m"
-        max-file: "3"
+        max-size: "10m"      # 로그 파일 최대 크기 10MB
+        max-file: "3"        # 최대 3개 파일만 보관 (오래된 로그 자동 삭제)
 
+# [네트워크 정의]
 networks:
   aquaponics-network:
     driver: bridge

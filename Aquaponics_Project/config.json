@@ -1,0 +1,216 @@
+{
+  "site_info": {
+    "name": "Aquaponics Smart Farm Multi-Zone",
+    "location": "Seocheon, Korea",
+    "version": "1.5.0",
+    "description": "Multi-Zone System (3 Filter Tanks, 3 Nutrient Tanks, 1 Cultivation Line)"
+  },
+  "hardware": {
+    "platform": "arduino_mega",
+    "connection": {
+      "type": "serial",
+      "port": "/dev/ttyUSB0",
+      "baud_rate": 115200,
+      "timeout": 2
+    },
+    "adc_modules": [
+      { "address": "0x48", "usage": "Zone A: Filter Tanks (pH)" },
+      { "address": "0x49", "usage": "Zone B: Nutrient Tank 1 (All) + Tank 2 (pH)" },
+      { "address": "0x4A", "usage": "Zone B: Nutrient Tank 2 (EC/DO) + Tank 3 (pH/EC)" },
+      { "address": "0x4B", "usage": "Zone B: Nutrient Tank 3 (DO) + Zone C: Line (EC)" }
+    ],
+    "enable_simulation": false,
+    "notes": "Arduino Mega 2560 + 4x ADS1115 (15 Precision Channels + Native Pins)"
+  },
+  "zones": {
+    "filtered_tanks": [
+      {
+        "id": "filter_tank_1",
+        "description": "Recirculation water tank #1",
+        "sensors": [
+          { "type": "ph", "model": "SEN0169-V2", "pin": "ADS_0x48_0" },
+          { "type": "turbidity", "model": "SEN0189", "pin": "A0", "notes": "Switch to Analog mode" },
+          { "type": "water_level", "model": "KIT0139", "pin": "A1", "notes": "Requires 24V I/V Converter" },
+          { "type": "temperature", "model": "DS18B20", "pin": "D2" }
+        ]
+      },
+      {
+        "id": "filter_tank_2",
+        "description": "Recirculation water tank #2",
+        "sensors": [
+          { "type": "ph", "model": "SEN0169-V2", "pin": "ADS_0x48_1" },
+          { "type": "turbidity", "model": "SEN0189", "pin": "A2" },
+          { "type": "water_level", "model": "KIT0139", "pin": "A3" },
+          { "type": "temperature", "model": "DS18B20", "pin": "D3" }
+        ]
+      },
+      {
+        "id": "filter_tank_3",
+        "description": "Recirculation water tank #3",
+        "sensors": [
+          { "type": "ph", "model": "SEN0169-V2", "pin": "ADS_0x48_2" },
+          { "type": "turbidity", "model": "SEN0189", "pin": "A4" },
+          { "type": "water_level", "model": "KIT0139", "pin": "A5" },
+          { "type": "temperature", "model": "DS18B20", "pin": "D4" }
+        ]
+      }
+    ],
+    "nutrient_tanks": [
+      {
+        "id": "nutrient_tank_1",
+        "description": "Nutrient solution tank #1",
+        "sensors": [
+          { "type": "ph", "model": "SEN0169-V2", "pin": "ADS_0x49_0" },
+          { "type": "ec", "model": "SEN0451", "pin": "ADS_0x49_1", "notes": "K=1.0 Probe" },
+          { "type": "do", "model": "SEN0237", "pin": "ADS_0x49_2" },
+          { "type": "temperature", "model": "DS18B20", "pin": "D5" }
+        ]
+      },
+      {
+        "id": "nutrient_tank_2",
+        "description": "Nutrient solution tank #2",
+        "sensors": [
+          { "type": "ph", "model": "SEN0169-V2", "pin": "ADS_0x49_3" },
+          { "type": "ec", "model": "SEN0451", "pin": "ADS_0x4A_0" },
+          { "type": "do", "model": "SEN0237", "pin": "ADS_0x4A_1" },
+          { "type": "temperature", "model": "DS18B20", "pin": "D6" }
+        ]
+      },
+      {
+        "id": "nutrient_tank_3",
+        "description": "Nutrient solution tank #3",
+        "sensors": [
+          { "type": "ph", "model": "SEN0169-V2", "pin": "ADS_0x4A_2" },
+          { "type": "ec", "model": "SEN0451", "pin": "ADS_0x4A_3" },
+          { "type": "do", "model": "SEN0237", "pin": "ADS_0x4B_0" },
+          { "type": "temperature", "model": "DS18B20", "pin": "D7" }
+        ]
+      }
+    ],
+    "cultivation_line": {
+      "id": "zone_cultivation_1",
+      "description": "Main cultivation line gradient (Zone C)",
+      "layout": ["start", "middle", "end"],
+      "points": {
+        "start": [
+          { "type": "ec", "model": "SEN0451", "pin": "ADS_0x4B_1" }
+        ],
+        "middle": [
+          { "type": "ec", "model": "SEN0451", "pin": "ADS_0x4B_2" }
+        ],
+        "end": [
+          { "type": "ec", "model": "SEN0451", "pin": "ADS_0x4B_3" }
+        ]
+      }
+    }
+  },
+  "monitoring": {
+    "reading_interval_seconds": 60,
+    "averaging_window": 10,
+    "alert_thresholds": {
+      "pH": {
+        "min": 6.8,
+        "max": 7.0,
+        "warning_min": 6.0,
+        "warning_max": 7.5,
+        "critical_min": 6.0,
+        "critical_max": 8.0,
+        "unit": "pH"
+      },
+      "EC": {
+        "min": 1200,
+        "max": 1600,
+        "warning_min": 1000,
+        "warning_max": 1800,
+        "critical_min": 800,
+        "critical_max": 2000,
+        "unit": "μS/cm",
+        "notes": "Sensor saturation at 2000"
+      },
+      "temperature": {
+        "min": 20,
+        "max": 26,
+        "warning_min": 18,
+        "warning_max": 28,
+        "critical_min": 15,
+        "critical_max": 32,
+        "unit": "°C"
+      },
+      "DO": {
+        "min": 5.0,
+        "warning_min": 3.0,
+        "critical_min": 3.0,
+        "unit": "mg/L"
+      },
+      "water_level": {
+        "min": 80,
+        "warning_min": 60,
+        "critical_min": 40,
+        "unit": "%",
+        "notes": "Stop pump at 40%"
+      },
+      "turbidity": {
+        "max": 50,
+        "warning_max": 100,
+        "critical_max": 100,
+        "unit": "NTU"
+      }
+    }
+  },
+  "calibration": {
+    "ph": {
+      "method": "3-point",
+      "points": [
+        { "value": 7.0, "name": "Neutral (Mid)" },
+        { "value": 4.0, "name": "Acidic (Low)" },
+        { "value": 10.0, "name": "Alkaline (High)" }
+      ],
+      "valid_days": 30
+    },
+    "ec": {
+      "method": "1-point",
+      "points": [
+        { "value": 1413, "name": "Standard (K=1)" }
+      ],
+      "valid_days": 30
+    },
+    "do": {
+      "method": "2-point",
+      "points": [
+        { "value": 0, "name": "Zero (Nitrogen)" },
+        { "value": 100, "name": "Span (Air-saturated)" }
+      ],
+      "valid_days": 90
+    },
+    "turbidity": {
+      "method": "baseline",
+      "points": [
+        { "value": 0, "name": "Clear Water (0 NTU)" }
+      ]
+    },
+    "water_level": {
+      "method": "hardware_potentiometer",
+      "notes": "Calibrate using Zero/Span screws on I/V Module. Do not use software calibration."
+    }
+  },
+  "database": {
+    "type": "sqlite",
+    "path": "/app/data/aquaponics.db",
+    "backup_path": "/app/data/backups/",
+    "retention_policy": {
+      "raw_data_days": 30,
+      "logs_days": 7
+    }
+  },
+  "web_server": {
+    "host": "0.0.0.0",
+    "port": 5000,
+    "debug_mode": false
+  },
+  "logging": {
+    "level": "INFO",
+    "file_path": "/app/data/logs/app.log",
+    "max_file_size_mb": 10,
+    "backup_count": 3
+  }
+}
