@@ -1,162 +1,185 @@
+#pragma once
+
 /**
- * Aquaponics Smart Farm - Arduino Configuration
- * * [Reflected Documentation]
- * - HARDWARE_SETUP.md: 4x ADS1115 Addressing & Channel Mapping
- * - README.md: Alert Thresholds (EC Saturation, Level Cutoff)
- * - CALIBRATION.md: Calibration defaults (1413uS, etc.)
+ * Aquaponics Smart Farm - Arduino Configuration (Finalized)
+ * - Centralized EC Limits
+ * - Sensor Filtering Parameters
+ * - DS18B20 Resolution (used in sensors.h)
  */
 
 #ifndef CONFIG_H
 #define CONFIG_H
 
 // ============================================================
-// I2C ADDRESS CONFIGURATION (ADS1115)
-// Ref: HARDWARE_SETUP.md Section 2
+// GLOBAL SENSOR FLAG CODES (for JSON output)
 // ============================================================
-#define ADS_ADDR_ZONE_A     0x48 // Filter Tanks (pH)
-#define ADS_ADDR_ZONE_B1    0x49 // Nutrient Tank 1 (All) + Tank 2 (pH)
-#define ADS_ADDR_ZONE_B2    0x4A // Nutrient Tank 2 (EC, DO) + Tank 3 (pH, EC)
-#define ADS_ADDR_ZONE_B3    0x4B // Nutrient Tank 3 (DO) + Line (EC)
+#define FLAG_OK           0
+#define FLAG_DISCONNECTED 1
+#define FLAG_SATURATED    2
 
-// ============================================================
-// SENSOR PIN & CHANNEL ASSIGNMENTS
-// ============================================================
+// DS18B20 async conversion wait (ms, for non-blocking pattern)
+// 12-bit resolution takes max 750ms.
+#define TEMP_CONVERT_MS   750
 
-// --- ZONE A: Filtered Water Tanks (3 Tanks) ---
-// ADS1115 (0x48) used for pH
-// Native Pins used for Turbidity (A) & Level (24V->5V)
-// Digital Pins used for Temp
-
-// Tank 1
-#define CH_A_TANK1_PH       0       // ADS(0x48) Ch 0
-#define PIN_A_TANK1_TURB    A0      // Native A0
-#define PIN_A_TANK1_LEVEL   A1      // Native A1
-#define PIN_A_TANK1_TEMP    2       // Digital D2
-
-// Tank 2
-#define CH_A_TANK2_PH       1       // ADS(0x48) Ch 1
-#define PIN_A_TANK2_TURB    A2      // Native A2
-#define PIN_A_TANK2_LEVEL   A3      // Native A3
-#define PIN_A_TANK2_TEMP    3       // Digital D3
-
-// Tank 3
-#define CH_A_TANK3_PH       2       // ADS(0x48) Ch 2
-#define PIN_A_TANK3_TURB    A4      // Native A4
-#define PIN_A_TANK3_LEVEL   A5      // Native A5
-#define PIN_A_TANK3_TEMP    4       // Digital D4
-
-// --- ZONE B: Nutrient Tanks (3 Tanks) ---
-// Complex mapping across 3 ADS modules (0x49, 0x4A, 0x4B)
-// Digital Pins used for Temp
-
-// Tank 1
-#define CH_B_TANK1_PH       0       // ADS(0x49) Ch 0
-#define CH_B_TANK1_EC       1       // ADS(0x49) Ch 1
-#define CH_B_TANK1_DO       2       // ADS(0x49) Ch 2
-#define PIN_B_TANK1_TEMP    5       // Digital D5
-
-// Tank 2
-#define CH_B_TANK2_PH       3       // ADS(0x49) Ch 3
-#define CH_B_TANK2_EC       0       // ADS(0x4A) Ch 0
-#define CH_B_TANK2_DO       1       // ADS(0x4A) Ch 1
-#define PIN_B_TANK2_TEMP    6       // Digital D6
-
-// Tank 3
-#define CH_B_TANK3_PH       2       // ADS(0x4A) Ch 2
-#define CH_B_TANK3_EC       3       // ADS(0x4A) Ch 3
-#define CH_B_TANK3_DO       0       // ADS(0x4B) Ch 0
-#define PIN_B_TANK3_TEMP    7       // Digital D7
-
-// --- ZONE C: Cultivation Line (EC Gradient) ---
-// All on ADS(0x4B)
-#define CH_C_START_EC       1       // ADS(0x4B) Ch 1
-#define CH_C_MID_EC         2       // ADS(0x4B) Ch 2
-#define CH_C_END_EC         3       // ADS(0x4B) Ch 3
-
-// --- SYSTEM PINS ---
-#define PIN_WATCHDOG_LED    13      // Heartbeat
-#define PIN_BUZZER          40      // Optional Alert
 
 // ============================================================
-// SYSTEM CONSTANTS
+// SYSTEM SETTINGS & DEBUG
 // ============================================================
+#define FIRMWARE_VERSION        "1.6.1"
+#define DEBUG_MODE              true
 #define SERIAL_BAUD_RATE        115200
-#define READ_INTERVAL_MS        1000    // Main loop delay
-#define SENSOR_STABILIZE_MS     10      // Delay between mux switches
+#define READ_INTERVAL_MS        1000
+#define SENSOR_STABILIZE_MS     20
+
 
 // ============================================================
-// CALIBRATION DEFAULTS
-// Ref: CALIBRATION.md
+// SENSOR SAMPLING / FILTERING
 // ============================================================
 
-// pH (3-Point)
-#define PH_REF_LOW              4.0
-#define PH_REF_MID              7.0
-#define PH_REF_HIGH             10.0
+// Raw sampling settings: Reads N samples with delay, then averages
+#define SENSOR_SAMPLES          10
+#define SENSOR_SAMPLE_DELAY_MS  5     // per sample
 
-// EC (1-Point)
-#define EC_REF_STANDARD         1413.0  // 1413 uS/cm
-#define EC_HARDWARE_LIMIT       2000.0  // SEN0451 K=1 Saturation Limit
+// Low-Pass Filter Alpha (0.0 ~ 1.0)
+// Lower value = Stronger filter (Slower response, smoother data)
+// Higher value = Weaker filter (Faster response, more noise)
+#define SENSOR_FILTER_ALPHA_PH      0.10    // Slow chemical change
+#define SENSOR_FILTER_ALPHA_EC      0.10    // Slow chemical change
+#define SENSOR_FILTER_ALPHA_DO      0.10    // Slow chemical change
+#define SENSOR_FILTER_ALPHA_TEMP    0.20    // Moderate thermal inertia
+#define SENSOR_FILTER_ALPHA_LEVEL   0.30    // Water surface ripples
+#define SENSOR_FILTER_ALPHA_TURB    0.30    // Suspension variance
 
-// DO (2-Point)
-#define DO_REF_ZERO             0.0     // 0% Saturation
-#define DO_REF_SPAN             100.0   // 100% Saturation
+// Temperature sensor resolution (9–12 bits)
+// 12-bit = 0.0625°C resolution (slowest), 9-bit = 0.5°C (fastest)
+#define TEMP_DS18_RESOLUTION    12
 
-// Turbidity (Baseline)
-#define TURB_REF_CLEAR          0.0     // 0 NTU
-
-// ============================================================
-// EEPROM MEMORY MAP
-// Allocated 20 bytes per sensor to prevent overlap.
-// Arduino Mega EEPROM: 4096 bytes
-// ============================================================
-
-// --- ZONE A (Filter Tanks) ---
-// pH (Needs 12 bytes each)
-#define ADDR_A_T1_PH            0
-#define ADDR_A_T2_PH            20
-#define ADDR_A_T3_PH            40
-
-// Turbidity (Needs 4 bytes each)
-#define ADDR_A_T1_TURB          60
-#define ADDR_A_T2_TURB          80
-#define ADDR_A_T3_TURB          100
-
-// --- ZONE B (Nutrient Tanks) ---
-// pH (12 bytes)
-#define ADDR_B_T1_PH            120
-#define ADDR_B_T2_PH            140
-#define ADDR_B_T3_PH            160
-
-// EC (4 bytes)
-#define ADDR_B_T1_EC            180
-#define ADDR_B_T2_EC            200
-#define ADDR_B_T3_EC            220
-
-// DO (4 bytes)
-#define ADDR_B_T1_DO            240
-#define ADDR_B_T2_DO            260
-#define ADDR_B_T3_DO            280
-
-// --- ZONE C (Line) ---
-// EC (4 bytes)
-#define ADDR_C_START_EC         300
-#define ADDR_C_MID_EC           320
-#define ADDR_C_END_EC           340
-
-// Total used: ~360 bytes (out of 4096) - Plenty of space
 
 // ============================================================
-// ALERT THRESHOLDS (Firmware Fallbacks)
-// Ref: README.md
+// I2C ADDRESS CONFIG (ADS1115)
+// ============================================================
+#define ADS_ADDR_ZONE_A     0x48
+#define ADS_ADDR_ZONE_B1    0x49
+#define ADS_ADDR_ZONE_B2    0x4A
+#define ADS_ADDR_ZONE_B3    0x4B
+
+#include <Adafruit_ADS1X15.h>
+
+#define ADS_GAIN_SETTING    GAIN_TWOTHIRDS
+#define ADS_VOLTAGE_MAX     6.144
+#define ADS_BIT_RESOLUTION  32768.0
+
+
+// ============================================================
+// SENSOR PIN / CHANNEL
 // ============================================================
 
-// These define valid ranges. Readings outside might flag SENSOR_OUT_OF_RANGE
-#define THRESH_PH_MIN           0.0
-#define THRESH_PH_MAX           14.0
+// --- ZONE A (Filter Tanks)
+#define CH_A_TANK1_PH       0
+#define PIN_A_TANK1_TURB    A0
+#define PIN_A_TANK1_LEVEL   A1
+#define PIN_A_TANK1_TEMP    2
 
-// Critical Hardware Safety
-#define THRESH_EC_SATURATION    2000.0  // Flag SENSOR_SATURATED if > 2000
-#define THRESH_LEVEL_LOW_CUTOFF 40.0    // % Pump Cutoff Risk
+#define CH_A_TANK2_PH       1
+#define PIN_A_TANK2_TURB    A2
+#define PIN_A_TANK2_LEVEL   A3
+#define PIN_A_TANK2_TEMP    3
 
-#endif // CONFIG_H
+#define CH_A_TANK3_PH       2
+#define PIN_A_TANK3_TURB    A4
+#define PIN_A_TANK3_LEVEL   A5
+#define PIN_A_TANK3_TEMP    4
+
+// --- ZONE B (Nutrient Tanks)
+#define CH_B_TANK1_PH       0
+#define CH_B_TANK1_EC       1
+#define CH_B_TANK1_DO       2
+#define PIN_B_TANK1_TEMP    5
+
+#define CH_B_TANK2_PH       3
+#define CH_B_TANK2_EC       0
+#define CH_B_TANK2_DO       1
+#define PIN_B_TANK2_TEMP    6
+
+#define CH_B_TANK3_PH       2
+#define CH_B_TANK3_EC       3
+#define CH_B_TANK3_DO       0
+#define PIN_B_TANK3_TEMP    7
+
+// --- ZONE C (EC Gradient)
+#define CH_C_START_EC       1
+#define CH_C_MID_EC         2
+#define CH_C_END_EC         3
+
+
+// ============================================================
+// SYSTEM PINS
+// ============================================================
+#define PIN_WATCHDOG_LED    13
+#define PIN_BUZZER          40
+
+
+// ============================================================
+// CALIBRATION REFERENCE
+// ============================================================
+#define PH_REF_LOW          4.0
+#define PH_REF_MID          7.0
+#define PH_REF_HIGH         10.0
+
+#define EC_REF_STANDARD     1413.0
+#define DO_REF_ZERO         0.0
+#define DO_REF_SPAN         100.0
+
+#define TURB_REF_CLEAR      0.0
+
+
+// ============================================================
+// EEPROM MAP
+// ============================================================
+#define EEPROM_MAGIC        0xAB
+#define ADDR_MAGIC          0
+
+#define ADDR_A_T1_PH        10
+#define ADDR_A_T2_PH        30
+#define ADDR_A_T3_PH        50
+#define ADDR_A_T1_TURB      70
+#define ADDR_A_T2_TURB      90
+#define ADDR_A_T3_TURB      110
+
+#define ADDR_B_T1_PH        130
+#define ADDR_B_T2_PH        150
+#define ADDR_B_T3_PH        170
+#define ADDR_B_T1_EC        190
+#define ADDR_B_T2_EC        210
+#define ADDR_B_T3_EC        230
+#define ADDR_B_T1_DO        250
+#define ADDR_B_T2_DO        270
+#define ADDR_B_T3_DO        290
+
+#define ADDR_C_START_EC     310
+#define ADDR_C_MID_EC       330
+#define ADDR_C_END_EC       350
+
+
+// ============================================================
+// LIMITS & ALERTS (CENTRALIZED)
+// ============================================================
+
+// [NEW] Single Source of Truth for EC Hardware Saturation
+// Used by ECSensor to clamp values and set FLAG_SATURATED
+#define EC_HARDWARE_LIMIT   2000.0
+
+// [Legacy] Kept for backward compatibility if needed, but prefer EC_HARDWARE_LIMIT
+#define EC_LIMIT            2000.0
+
+#define HARD_TEMP_MIN       -10.0
+#define HARD_TEMP_MAX       80.0
+
+// SOFT ALERT threshold (Software Logic Use)
+#define ALERT_LEVEL_LOW     40.0
+#define ALERT_PH_LOW        5.5
+#define ALERT_PH_HIGH       8.5
+#define ALERT_DO_LOW        4.5
+#define ALERT_EC_HIGH       1800.0
+
+#endif

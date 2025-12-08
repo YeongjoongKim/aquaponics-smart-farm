@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aquaponics Smart Farm</title>
+    
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        /* 다크 모드 스타일 커스텀 */
+        body { background-color: #1a1c24; color: #e0e0e0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .navbar { background-color: #252836; border-bottom: 1px solid #3f4354; }
+        .card { background-color: #252836; border: 1px solid #3f4354; margin-bottom: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .card-header { background-color: #2f3342; border-bottom: 1px solid #3f4354; font-weight: bold; color: #ffffff; border-radius: 12px 12px 0 0 !important; }
+        
+        /* 센서 값 스타일 */
+        .sensor-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #383b47; }
+        .sensor-row:last-child { border-bottom: none; }
+        .sensor-label { color: #b0b3b8; font-size: 0.95rem; }
+        .sensor-value { font-size: 1.2rem; font-weight: bold; color: #fff; }
+        .unit { font-size: 0.8rem; color: #6c757d; margin-left: 3px; }
+        
+        /* 구역별 포인트 컬러 */
+        .zone-a-title { color: #00e676; } /* Green */
+        .zone-b-title { color: #2979ff; } /* Blue */
+        .zone-c-title { color: #ff9100; } /* Orange */
+
+        /* 상태 배지 */
+        .badge-normal { background-color: rgba(0, 230, 118, 0.15); color: #00e676; border: 1px solid rgba(0, 230, 118, 0.3); }
+        .badge-warning { background-color: rgba(255, 145, 0, 0.15); color: #ff9100; border: 1px solid rgba(255, 145, 0, 0.3); }
+        .badge-critical { background-color: rgba(255, 23, 68, 0.15); color: #ff1744; border: 1px solid rgba(255, 23, 68, 0.3); }
+
+        footer { font-size: 0.8rem; color: #6c757d; padding: 20px; text-align: center; }
+    </style>
+</head>
+<body>
+
+    <nav class="navbar navbar-dark mb-4">
+        <div class="container-fluid">
+            <span class="navbar-brand mb-0 h1">
+                <i class="fa-solid fa-leaf text-success me-2"></i>Aquaponics Smart Farm
+            </span>
+            <span class="navbar-text" id="system-status">
+                <i class="fa-solid fa-circle-notch fa-spin"></i> 연결 중...
+            </span>
+        </div>
+    </nav>
+
+    <div class="container-fluid px-4">
+        
+        <h4 class="mb-3 zone-a-title"><i class="fa-solid fa-water me-2"></i>Zone A: 여과 탱크 (Filtered Water)</h4>
+        <div class="row" id="zone-a-container">
+            </div>
+
+        <hr class="border-secondary my-4">
+
+        <h4 class="mb-3 zone-b-title"><i class="fa-solid fa-flask me-2"></i>Zone B: 배양액 탱크 (Nutrient Solution)</h4>
+        <div class="row" id="zone-b-container">
+            </div>
+
+        <hr class="border-secondary my-4">
+
+        <h4 class="mb-3 zone-c-title"><i class="fa-solid fa-seedling me-2"></i>Zone C: 재배 라인 (EC Gradient)</h4>
+        <div class="row" id="zone-c-container">
+            </div>
+
+    </div>
+
+    <footer>
+        <p>Aquaponics Monitoring System v1.5.0 | Data refreshes every 5 seconds</p>
+    </footer>
+
+    <script>
+        const API_URL = '/api/current';
+        const STATUS_URL = '/api/status';
+
+        // 1. 초기 로드 및 주기적 갱신
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchStatus();
+            fetchData();
+            setInterval(fetchData, 5000); // 5초마다 데이터 갱신
+            setInterval(fetchStatus, 30000); // 30초마다 상태 확인
+        });
+
+        // 2. 시스템 상태 확인
+        function fetchStatus() {
+            fetch(STATUS_URL)
+                .then(res => res.json())
+                .then(data => {
+                    const statusEl = document.getElementById('system-status');
+                    if(data.status === 'healthy') {
+                        statusEl.innerHTML = '<i class="fa-solid fa-circle text-success me-1"></i> 정상 작동 중';
+                    } else {
+                        statusEl.innerHTML = '<i class="fa-solid fa-triangle-exclamation text-warning me-1"></i> 점검 필요';
+                    }
+                })
+                .catch(() => {
+                    document.getElementById('system-status').innerHTML = '<i class="fa-solid fa-circle-xmark text-danger me-1"></i> 연결 끊김';
+                });
+        }
+
+        // 3. 센서 데이터 가져오기 및 렌더링
+        function fetchData() {
+            fetch(API_URL)
+                .then(res => res.json())
+                .then(response => {
+                    if(response.status === 'success') {
+                        renderZoneA(response.data.zone_a_filtered);
+                        renderZoneB(response.data.zone_b_nutrient);
+                        renderZoneC(response.data.zone_c_cultivation);
+                    }
+                })
+                .catch(err => console.error("Data fetch error:", err));
+        }
+
+        // --- 렌더링 헬퍼 함수들 ---
+
+        // Zone A: pH, 탁도, 수위, 수온
+        function renderZoneA(data) {
+            const container = document.getElementById('zone-a-container');
+            container.innerHTML = ''; // 초기화
+
+            // 데이터가 없으면 표시 안 함
+            if (!data) return;
+
+            Object.keys(data).sort().forEach(tankId => {
+                const sensors = data[tankId];
+                // tank_1 -> Tank 1 변환
+                const title = tankId.replace('tank_', 'Tank ').toUpperCase();
+                
+                const cardHtml = `
+                    <div class="col-md-4">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between">
+                                <span>${title}</span>
+                                <span class="badge badge-normal">Running</span>
+                            </div>
+                            <div class="card-body">
+                                ${renderSensorRow('수위 (Level)', Number(sensors.water_level).toFixed(1), '%', 'fa-arrow-up-from-water-pump')}
+                                ${renderSensorRow('수온 (Temp)', sensors.temperature, '°C', 'fa-temperature-half')}
+                                ${renderSensorRow('pH 농도', sensors.ph, '', 'fa-droplet')}
+                                ${renderSensorRow('탁도 (Turbidity)', sensors.turbidity, 'NTU', 'fa-eye-low-vision')}
+                            </div>
+                        </div>
+                    </div>`;
+                container.innerHTML += cardHtml;
+            });
+        }
+
+        // Zone B: pH, EC, DO, 수온
+        function renderZoneB(data) {
+            const container = document.getElementById('zone-b-container');
+            container.innerHTML = '';
+
+            if (!data) return;
+
+            Object.keys(data).sort().forEach(tankId => {
+                const sensors = data[tankId];
+                const title = tankId.replace('tank_', 'Tank ').toUpperCase();
+
+                const cardHtml = `
+                    <div class="col-md-4">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between">
+                                <span>${title}</span>
+                                <span class="badge badge-normal">Active</span>
+                            </div>
+                            <div class="card-body">
+                                ${renderSensorRow('pH 농도', sensors.ph, '', 'fa-droplet')}
+                                ${renderSensorRow('전도도 (EC)', sensors.ec, 'μS/cm', 'fa-bolt')}
+                                ${renderSensorRow('용존산소 (DO)', sensors.do, 'mg/L', 'fa-wind')}
+                                ${renderSensorRow('수온 (Temp)', sensors.temperature, '°C', 'fa-temperature-half')}
+                            </div>
+                        </div>
+                    </div>`;
+                container.innerHTML += cardHtml;
+            });
+        }
+
+        // Zone C: 재배 라인 (EC Gradient)
+        function renderZoneC(data) {
+            const container = document.getElementById('zone-c-container');
+            container.innerHTML = ''; 
+            if (!data) return;
+
+            const order = ['start', 'middle', 'end'];
+            
+            order.forEach(point => {
+                if(!data[point]) return;
+                const sensors = data[point];
+                const title = point.charAt(0).toUpperCase() + point.slice(1) + " Point"; 
+
+                const cardHtml = `
+                    <div class="col-md-4">
+                        <div class="card h-100">
+                            <div class="card-header text-center">
+                                ${title}
+                            </div>
+                            <div class="card-body d-flex flex-column justify-content-center align-items-center" style="min-height: 180px;">
+                                
+                                <h2 class="display-3 fw-bold text-primary mb-2 text-center w-100">
+                                    ${sensors.ec}
+                                </h2>
+                                
+                                <div class="text-white-50 mb-2">μS/cm</div>
+                                <div class="text-secondary small">Nutrient Concentration (EC)</div>
+                            </div>
+                        </div>
+                    </div>`;
+                container.innerHTML += cardHtml;
+            });
+        }
+
+        // 개별 센서 행 생성 함수
+        function renderSensorRow(label, value, unit, iconClass) {
+            // 값이 없거나 null인 경우 처리
+            const displayValue = (value === null || value === undefined) ? '--' : value;
+            
+            return `
+                <div class="sensor-row">
+                    <span class="sensor-label"><i class="fa-solid ${iconClass} me-2" style="width:20px"></i>${label}</span>
+                    <div>
+                        <span class="sensor-value">${displayValue}</span>
+                        <span class="unit">${unit}</span>
+                    </div>
+                </div>`;
+        }
+
+        // 소수점 자리수 포맷팅 (정수는 그대로, 실수는 소수점 2자리)
+        function formatValue(val) {
+            if (val === null || val === undefined) return '--';
+            return Number.isInteger(val) ? val : val.toFixed(1);
+        }
+
+    </script>
+</body>
+</html>

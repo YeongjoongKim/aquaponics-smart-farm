@@ -21,6 +21,7 @@ from .config import ConfigLoader
 from .database import DatabaseManager
 from .sensors import SensorManager
 from .flask_app import create_app # Import the factory function for Flask app
+from .alerts import AlertManager
 
 # =============================================================
 # 1. CONFIGURATION AND LOGGING SETUP
@@ -31,6 +32,7 @@ from .flask_app import create_app # Import the factory function for Flask app
 config: Optional[ConfigLoader] = None
 db_manager: Optional[DatabaseManager] = None
 sensor_manager: Optional[SensorManager] = None
+alert_manager: Optional[AlertManager] = None
 
 def setup_logging(log_level: str):
     """Initializes the logging system."""
@@ -92,106 +94,6 @@ def setup_logging(log_level: str):
     logging.info(f"Logging initialized at level: {log_level.upper()}")
 
 # =============================================================
-# 2. ALERT THRESHOLD CHECKER
-# =============================================================
-
-def get_param_type_from_id(sensor_id: str) -> str:
-    """Extracts the base parameter type (e.g., pH, EC, Temp) from the full sensor ID."""
-    # Sensor IDs are typically structured like zone_tank_type (e.g., zone_b_ph, za_t1_lvl)
-    # The parameter type is always the last segment.
-    
-    # Use a dictionary mapping to handle known types for reliable lookup, 
-    # but fall back to the last segment if needed.
-    known_types = {
-        'ph': 'PH', 'ec': 'EC', 'temp': 'TEMPERATURE', 
-        'do': 'DO', 'lvl': 'WATER_LEVEL', 'turb': 'TURBIDITY',
-        'level': 'WATER_LEVEL', 'temperature': 'TEMPERATURE',
-        'turbidity': 'TURBIDITY'
-    }
-    
-    # Split by underscore and get the last part
-    last_segment = sensor_id.split('_')[-1].lower()
-    
-    # Map to the uppercase key used in config.json alert thresholds
-    if last_segment in known_types:
-        return known_types[last_segment]
-    
-    # Handle cases like 'temperature' that might be split from a longer ID, 
-    # or match the config keys if the ID is just the type.
-    return last_segment.upper()
-
-def check_and_raise_alerts(readings_data: Dict[str, Any]):
-    """
-    Compares current readings against configured thresholds and saves alerts.
-    Handles None values as SENSOR_DISCONNECTED SYSTEM_FAULT.
-    Handles out-of-bounds saturation values (e.g., 2000 for EC).
-    """
-    if not db_manager or not config:
-        logging.error("Alert check failed: Database or Config manager not initialized.")
-        return
-
-    thresholds = config.get_alert_thresholds()
-    alerts_triggered = 0
-
-    # readings_data['readings'] contains cleaned values (float or None for disconnect)
-    for sensor_id, value in readings_data.get('readings', {}).items():
-        param_type = get_param_type_from_id(sensor_id)
-        param_thresholds = thresholds.get(param_type)
-
-        if not param_thresholds:
-            # This is common for sensors like Turbidity that might not be in the config key name
-            # logging.debug(f"No threshold configuration found for parameter type: {param_type} (Sensor: {sensor_id})")
-            continue
-        
-        alert_type = None
-        message = ""
-        
-        min_warn = param_thresholds.get('min')
-        max_warn = param_thresholds.get('max')
-        min_crit = param_thresholds.get('critical_min')
-        max_crit = param_thresholds.get('critical_max')
-        unit = param_thresholds.get('unit', '')
-
-        if value is None or value == -127.0: # -127.0 is the DS18B20 error code
-            # SYSTEM_FAULT: Sensor disconnection or error
-            alert_type = "SYSTEM_FAULT"
-            value_display = value if value is not None else "NULL"
-            message = f"SYSTEM_FAULT: Sensor '{sensor_id}' reported error value {value_display}."
-            
-        elif value is not None:
-            # Check for CRITICAL thresholds
-            if min_crit is not None and value < min_crit:
-                alert_type = "CRITICAL"
-                message = f"CRITICAL: {sensor_id} value {value:.2f}{unit} is below CRITICAL minimum {min_crit}{unit}."
-            elif max_crit is not None and value > max_crit:
-                alert_type = "CRITICAL"
-                message = f"CRITICAL: {sensor_id} value {value:.2f}{unit} is above CRITICAL maximum {max_crit}{unit}."
-            
-            # Check for WARNING thresholds if not already CRITICAL
-            elif alert_type is None:
-                if min_warn is not None and value < min_warn:
-                    alert_type = "WARNING"
-                    message = f"WARNING: {sensor_id} value {value:.2f}{unit} is below optimal minimum {min_warn}{unit}."
-                elif max_warn is not None and value > max_warn:
-                    alert_type = "WARNING"
-                    message = f"WARNING: {sensor_id} value {value:.2f}{unit} is above optimal maximum {max_warn}{unit}."
-
-        if alert_type:
-            alert_data = {
-                "sensor_id": sensor_id,
-                "alert_type": alert_type,
-                "value": value if value is not None else -999.0, # Use placeholder for null/error values
-                "threshold_min": min_warn,
-                "threshold_max": max_warn,
-                "message": message
-            }
-            db_manager.save_alert(alert_data)
-            alerts_triggered += 1
-
-    if alerts_triggered > 0:
-        logging.warning(f"Total {alerts_triggered} new alerts recorded.")
-
-# =============================================================
 # 3. MAIN SCHEDULER LOOP
 # =============================================================
 
@@ -200,7 +102,7 @@ def scheduler_loop():
     The main thread loop responsible for reading data, saving, and checking alerts.
     This thread is managed by the main function and runs independently.
     """
-    global config, db_manager, sensor_manager
+    global config, db_manager, sensor_manager, alert_manager
     logging.info("Scheduler started.")
     
     # Initial read interval might be slow until config loads, use a default safety value
@@ -226,7 +128,8 @@ def scheduler_loop():
                 db_manager.save_readings(readings_data['readings'])
                 
                 # 3. Check for Alerts
-                check_and_raise_alerts(readings_data)
+                if alert_manager:
+                    alert_manager.check_readings(readings_data)
 
             else:
                 logging.error("Failed to acquire valid readings from Arduino.")
@@ -290,59 +193,64 @@ def start_flask_server():
 
 def main():
     """
-    Initializes system components and starts the main threads.
+    시스템 컴포넌트를 순서대로 초기화하고 메인 스레드를 시작합니다.
     """
-    global config, db_manager, sensor_manager
+    global config, db_manager, sensor_manager, alert_manager
     
-    # --- Initialization Step 1: Configuration ---
+    # [Step 1] 설정 로드
     try:
-        # Load config from the path where Docker volume mounts it
-        # We assume the config file is in the root of the Docker WORKDIR (/app)
         config = ConfigLoader('config.json') 
         setup_logging(config.get_logging_level())
         logging.info("Application Initialization starting...")
     except Exception as e:
-        print(f"FATAL: Configuration setup failed. Exiting. Error: {e}")
-        sys.exit(1) # Use sys.exit(1) for cleaner shutdown
+        print(f"FATAL: Config setup failed. {e}")
+        sys.exit(1)
 
-    # --- Initialization Step 2: Database ---
+    # [Step 2] 데이터베이스 초기화
     try:
         db_manager = DatabaseManager(config)
-        # db_manager.init_db() is called in constructor
         logging.info("Database initialized successfully.")
     except Exception as e:
-        logging.critical(f"FATAL: Database initialization failed. Exiting. Error: {e}")
+        logging.critical(f"FATAL: Database setup failed. {e}")
         sys.exit(1)
         
-    # --- Initialization Step 3: Sensor Manager (Serial) ---
+    # [Step 3] 센서 매니저 초기화 (시리얼 연결)
     try:
         sensor_manager = SensorManager(config)
-        if not sensor_manager.serial_handler.is_connected:
-             # Log an error, but don't exit. The scheduler will try to reconnect.
-             logging.error("Serial connection failed during startup. Scheduler will attempt reconnect.")
+        if sensor_manager.serial_handler.is_connected:
+            logging.info("Serial connection established.")
         else:
-            logging.info("Serial connection established successfully.")
+            logging.error("Serial connection failed. Scheduler will retry.")
     except Exception as e:
-        logging.critical(f"FATAL: Sensor manager initialization failed. Exiting. Error: {e}")
+        logging.critical(f"FATAL: Sensor manager setup failed. {e}")
         sys.exit(1)
 
-    # --- Initialization Step 4: Start Threads ---
+    # [Step 4] 알림 매니저 초기화
+    # 반드시 DB와 Config가 준비된 후에 초기화해야 합니다.
+    try:
+        alert_manager = AlertManager(config, db_manager)
+        logging.info("Alert Manager initialized successfully.")
+    except Exception as e:
+        logging.critical(f"FATAL: Alert manager setup failed. {e}")
+        sys.exit(1)
+
+    # [Step 5] 스레드 및 서버 시작
     
-    # 1. Start the data acquisition scheduler thread (Daemon)
+    # 1. 데이터 수집 스케줄러 시작 (백그라운드 데몬)
     scheduler_thread = threading.Thread(target=scheduler_loop, name="SchedulerThread")
     scheduler_thread.daemon = True
     scheduler_thread.start()
     logging.info("Data acquisition scheduler thread started.")
     
-    # 2. Start the web server thread (Blocking call on the main thread)
+    # 2. 웹 서버 시작 (메인 스레드 블로킹)
     try:
         start_flask_server()
     except KeyboardInterrupt:
-        logging.info("Flask server received interrupt signal.")
+        logging.info("Flask server stopped by user.")
     except Exception as e:
-        logging.critical(f"Flask server exited unexpectedly: {e}")
+        logging.critical(f"Flask server crashed: {e}")
     finally:
-        logging.info("Aquaponics Smart Farm stopped.")
+        logging.info("System shutdown complete.")
 
 if __name__ == '__main__':
     main()
